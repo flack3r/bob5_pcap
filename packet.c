@@ -27,6 +27,14 @@ void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char
 		printf("Invalid IP headerl ength: %u bytes\n", size_ip);
 		exit(-1);
 	}
+
+	switch(ip->ip_p)
+	{
+		case IPPROTO_TCP:
+			break;
+		default:
+			return;
+	}
 	tcp = (struct sniff_tcp*)(packet + SIZE_ETHERNET + size_ip);
 	size_tcp = TH_OFF(tcp)*4;
 	if(size_tcp < 20)
@@ -34,7 +42,6 @@ void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char
 		printf("Invalid TCP header length: %u bytes\n", size_tcp);
 		exit(-1);
 	}
-	payload = (u_char*)(packet + SIZE_ETHERNET + size_ip + size_tcp);
 
 	printf("[*]====Print Info==== \n");
 	printf("[-]eth.smac: %s\n",ether_ntoa(ethernet->ether_shost));
@@ -49,13 +56,7 @@ void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char
 int main(int argc, char* argv[])
 {
 	pcap_t* handle;
-	pcap_t* p;
-	struct pcap_pkthdr header;
-	struct bpf_program fp;
-	bpf_u_int32 net;
-	const u_char *packet;
 	char* dev, errbuf[PCAP_ERRBUF_SIZE];
-	char filter_exp[] = "tcp";
 
 	dev = pcap_lookupdev(errbuf);
 
@@ -75,18 +76,6 @@ int main(int argc, char* argv[])
 	if( pcap_datalink(handle) != DLT_EN10MB)
 	{
 		fprintf(stderr, "%s is not an Ethernet\n", dev);
-		return -1;
-	}
-
-	if( pcap_compile(handle, &fp, filter_exp, 0 ,net) == -1)
-	{
-		fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(handle));
-		return -1;
-	}
-
-	if( pcap_setfilter(handle, &fp) == -1)
-	{
-		fprintf(stderr, "Couldn't install filter %s: %s\n", filter_exp, pcap_geterr(handle));
 		return -1;
 	}
 
