@@ -1,87 +1,96 @@
-#include <stdio.h>
-#include <pcap.h>
+#include <pcap/pcap.h>
 #include "packet.h"
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <stdlib.h>
+#include "arp.h"
 
-void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
+#define ETHER_HEAD_LEN 14
+
+extern int GetMacflag;
+extern arphdr_t arp_attack_packet;
+extern struct sniff_ethernet et_attack_packet;
+
+// sniff handler
+void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet, char* ip)
 {
-	//sniff packet
-	#define SIZE_ETHERNET 14
-	const struct sniff_ethernet* ethernet;
-	const struct sniff_ip* ip;
-	const struct sniff_tcp* tcp;
-	const u_char* payload;
+	struct sniff_ethernet *eth = (struct sniff_ethernet *)packet;
+	eth->ether_type = ntohs(eth->ether_type);
 
-	u_int size_ip;
-	u_int size_tcp;
+	if (eth->ether_type != 0x806) return;
 
-	printf("Jacked a packet with length of [%d]\n", header->len);
-	ethernet = (struct sniff_ethernet*)(packet);
-	ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
-	size_ip = IP_HL(ip)*4;
-	if (size_ip < 20)
+	arphdr_t* arpheader = (struct arphdr_t *)(packet + ETHER_HEAD_LEN); /* Point to the ARP header */
+	arpheader->htype = ntohs(arpheader->htype);
+	arpheader->ptype = ntohs(arpheader->ptype);
+	arpheader->oper = ntohs(arpheader->oper);
+
+	char saddr[16];
+	sprintf(saddr, "%d.%d.%d.%d", arpheader->spa[0], arpheader->spa[1], arpheader->spa[2], arpheader->spa[3]);
+	//printf("target ip: %s, packet get ip: %s \n", ip, saddr);
+	//printf("len: %d, packet len: %d \n", strlen(ip), strlen(saddr));
+	//not filter
+	if(strcmp(saddr,ip))
 	{
-		printf("Invalid IP headerl ength: %u bytes\n", size_ip);
-		exit(-1);
+		return;
 	}
 
-	switch(ip->ip_p)
-	{
-		case IPPROTO_TCP:
-			break;
-		default:
-			return;
-	}
-	tcp = (struct sniff_tcp*)(packet + SIZE_ETHERNET + size_ip);
-	size_tcp = TH_OFF(tcp)*4;
-	if(size_tcp < 20)
-	{
-		printf("Invalid TCP header length: %u bytes\n", size_tcp);
-		exit(-1);
-	}
+	printf("\n\nReceived Packet Size: %d bytes\n", header->len);
+	printf("Hardware type: %s\n", (arpheader->htype == 1) ? "Ethernet" : "Unknown");
+	printf("Protocol type: %s\n", (arpheader->ptype == 0x0800) ? "IPv4" : "Unknown");
+	printf("Operation: %s\n", (arpheader->oper == ARP_REQUEST)? "ARP Request" : "ARP Reply");
 
-	printf("[*]====Print Info==== \n");
-	printf("[-]eth.smac: %s\n",ether_ntoa(ethernet->ether_shost));
-	printf("[-]eth.dmac: %s\n",ether_ntoa(ethernet->ether_dhost));
-	printf("[-]ip.sip: %s\n", inet_ntoa(ip->ip_src));
-	printf("[-]ip.dip: %s\n", inet_ntoa(ip->ip_dst));
-	printf("[-]tcp.sport: %d\n", ntohs(tcp->th_sport));
-	printf("[-]tcp.dport: %d\n", ntohs(tcp->th_dport));
-	printf("\n");
+	GetMacflag = 1;
+ 	/* If is Ethernet and IPv4, print packet contents */
+	if (arpheader->htype == 1 && arpheader->ptype == 0x0800)
+	{
+		int i;
+		printf("Sender MAC: ");
+	    for(i=0; i<6;i++)
+	    {
+	        printf("%02X:", arpheader->sha[i]);
+	        et_attack_packet.ether_dhost[i] = arpheader->sha[i];
+	    }
+
+	    printf("\nSender IP: ");
+	    for(i=0; i<4;i++)
+	        printf("%d.", arpheader->spa[i]);
+
+	    printf("\nTarget MAC: ");
+	    for(i=0; i<6;i++)
+	    {
+	        printf("%02X:", arpheader->tha[i]);
+	    }
+
+	    printf("\nTarget IP: ");
+	    for(i=0; i<4; i++)
+	        printf("%d.", arpheader->tpa[i]);
+
+    	printf("\n");
+	}
 }
 
-int main(int argc, char* argv[])
+//sniff main
+void* packet_sniffer_main(void* arg)
 {
-	pcap_t* handle;
+	//pcap_t* handle;
+	struct bpf_program filter;
 	char* dev, errbuf[PCAP_ERRBUF_SIZE];
+	bpf_u_int32 mask=0;
+	/* [stage1] packet capture callback function*/
+	pthread_argv *pargv = (pthread_argv *)arg; 
+	pcap_t *handle = (pcap_t *)pargv->handle;
 
-	dev = pcap_lookupdev(errbuf);
+	struct pcap_pkthdr *header;
+	const unsigned char *packet;
 
-	if(dev == NULL)
-	{
-		fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
-		return -1;
-	}
-	printf("Device: %s\n", dev);
-	handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
-	if(handle == NULL)
-	{
-		fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
-		return -1;
-	}
+	while(1) {
+		int ret = pcap_next_ex(handle, &header, &packet);
+		if (ret == 0) continue;
+		else if (ret < 0) {
+			printf("[*] Couldn't receive packets\n");
+			return -1;
+		}
 
-	if( pcap_datalink(handle) != DLT_EN10MB)
-	{
-		fprintf(stderr, "%s is not an Ethernet\n", dev);
-		return -1;
+		packet_handler(NULL, header, packet, pargv->ip);
 	}
 
-	pcap_loop(handle, 0, packet_handler, NULL);
 	pcap_close(handle);
-
-	return 0;
-	
+	return NULL;
 }
