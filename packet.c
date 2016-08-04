@@ -1,4 +1,5 @@
 #include <pcap/pcap.h>
+#include <stdio.h>
 #include "packet.h"
 #include "arp.h"
 
@@ -79,8 +80,14 @@ void packet_handler(pcap_t *handle, const struct pcap_pkthdr *header, const u_ch
 			if(GetGateMacflag == 1)
 			{
 				et_gate_packet.ether_type = eth->ether_type;
-
 				memcpy(packet, &et_gate_packet, sizeof(struct sniff_ethernet));
+					
+				printf("header len: %d \n",header->len);
+				FILE* f1 = fopen("debug", "a+");
+				fprintf(f1,"=======\n");
+				fwrite(packet, header->len, 1, f1);
+				fclose(f1);
+
 				if(pcap_sendpacket(handle, packet, header->len) != 0)
 				{
 					fprintf(stderr,"Error sending victim to gateway\n");

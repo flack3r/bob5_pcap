@@ -202,7 +202,7 @@ void* arp_spoof_main(void* arg)
 	printf("[*]attack!!!!\n");
 	while(1)
 	{
-		sleep(0.5);
+		sleep(1);
 		if(pcap_sendpacket(handle, packet, packet_len) != 0)
 		{
 			fprintf(stderr,"Error sending arp packet\n");
