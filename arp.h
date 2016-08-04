@@ -33,6 +33,6 @@ typedef struct arphdr {
 }arphdr_t;
 
 
-void GetGateway(char* line[]);
+void GetGateway(char* line, char* gate_line);
 void* arp_spoof_main(void*);
 #endif

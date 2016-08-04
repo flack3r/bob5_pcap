@@ -8,8 +8,10 @@
 #include "packet.h"
 #include "arp.h"
 
-int GetMacflag = 0;
+int GetMacflag=0;
+int GetGateMacflag=0;
 struct sniff_ethernet et_attack_packet;
+struct sniff_ethernet et_gate_packet;
 arphdr_t arp_attack_packet;
 
 int main(int argc, char* argv[])

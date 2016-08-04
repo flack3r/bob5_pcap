@@ -60,6 +60,6 @@ struct sniff_tcp {
 	u_short th_urp;		/* urgent pointer */
 };
 
-void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet, char* ip);
+void packet_handler(pcap_t *handle, const struct pcap_pkthdr *header, const u_char *packet, char* ip);
 void* packet_sniffer_main(void *);
 #endif
